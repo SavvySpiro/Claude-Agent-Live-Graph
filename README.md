@@ -3,7 +3,7 @@
 A live, editable graph of the [Claude Code](https://claude.com/claude-code) agents running on your machine, and
 the files they are changing.
 
-![agentgraph showing demo agents in nested boxes, linked team-to-team, with the files they edit](docs/screenshot.png)
+![agentgraph showing demo agents in nested boxes, linked team-to-team, with the files they edit](docs/agentgraph-demo.png)
 
 *Made-up agents from `scripts/demo.py`, arranged with boxes (Backend and QA nested inside Refactor squad),
 group-to-group hierarchy links, a note, and the **Hierarchy** layout.*
