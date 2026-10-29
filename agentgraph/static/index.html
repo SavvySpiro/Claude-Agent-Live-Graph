@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Graph</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header id="toolbar">
+  <div class="brand">Agent Graph</div>
+  <form id="dir-form" class="dir" autocomplete="off">
+    <label for="dir-input">Files in</label>
+    <input id="dir-input" list="dir-suggest" placeholder="/path/to/reports" spellcheck="false">
+    <datalist id="dir-suggest"></datalist>
+    <button type="submit">Watch</button>
+  </form>
+  <div class="tools">
+    <div class="seg" title="Layout">
+      <button data-layout="hierarchy" title="Top-down by hierarchy links and file edges (H)">Hierarchy</button>
+      <button data-layout="groups" title="Force layout that keeps boxes together">Groups</button>
+      <button data-layout="files" title="Line files up in a grid under the agents">Tidy files</button>
+      <button data-act="fit" title="Fit to screen (F)">Fit</button>
+    </div>
+    <div class="seg">
+      <button data-act="box" id="btn-box" title="Drag a rectangle; enclosed nodes become a box (B)">▭ Draw box</button>
+      <button data-act="group" title="Put selected nodes in a new box (G)">Group selected</button>
+      <button data-act="note" title="Add an annotation (N)">✎ Note</button>
+      <button data-act="link" title="Hierarchy link: select parent then child, press L">↳ Link</button>
+    </div>
+    <div class="seg toggles">
+      <label title="Show files nobody has edited recently"><input type="checkbox" id="opt-allfiles" checked> all files</label>
+      <label title="Show idle / finished agents"><input type="checkbox" id="opt-idle" checked> idle</label>
+      <button data-act="unhide" id="btn-unhide" hidden></button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div id="cy"></div>
+  <aside id="legend" aria-label="Legend"></aside>
+  <aside id="panel" hidden></aside>
+  <div id="ctx" hidden></div>
+  <div id="tip" hidden></div>
+  <div id="toast" hidden></div>
+  <div id="mode-hint" hidden></div>
+</main>
+
+<footer id="status"><span id="status-text">connecting…</span><span class="keys">drag: move · shift-drag: select · dbl-click agent: open in terminal · right-click: menu · G group · N note · L link · Del remove</span></footer>
+
+<script src="/static/vendor/cytoscape.min.js"></script>
+<script src="/static/vendor/cytoscape-compound-drag-and-drop.js"></script>
+<script src="/static/vendor/cytoscape-node-html-label.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
