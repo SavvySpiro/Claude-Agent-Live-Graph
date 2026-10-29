@@ -31,8 +31,8 @@ group-to-group hierarchy links, a note, and the **Hierarchy** layout.*
 You need Python 3.9 or newer and Claude Code. It works on Linux and macOS.
 
 ```bash
-git clone https://github.com/<you>/agentgraph.git
-cd agentgraph
+git clone https://github.com/SavvySpiro/Claude-Agent-Live-Graph.git
+cd Claude-Agent-Live-Graph
 pip install -e .          # installs Flask and an `agentgraph` command
 ```
 
