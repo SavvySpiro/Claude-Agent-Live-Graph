@@ -60,12 +60,12 @@ const cy = cytoscape({
     { selector: 'node.file.missing', style: { 'border-style': 'dotted', color: '#8b919c' } },
     { selector: 'node.file:selected', style: { 'border-color': '#fff', 'border-width': 2.5 } },
     { selector: 'node.group', style: {
-      shape: 'round-rectangle', 'background-color': 'data(color)', 'background-opacity': 0.07,
-      'border-width': 1.5, 'border-style': 'dashed', 'border-color': 'data(color)', label: 'data(label)',
+      shape: 'round-rectangle', 'background-color': 'data(color)', 'background-opacity': 0.12,
+      'border-width': 2, 'border-style': 'solid', 'border-opacity': 0.8, 'border-color': 'data(color)', label: 'data(label)',
       'text-valign': 'top', 'text-halign': 'center', 'text-margin-y': -4, 'font-size': 14, 'font-weight': 'bold',
       color: 'data(color)', padding: 24, width: 180, height: 100, 'min-width': 180, 'min-height': 100,
       'corner-radius': 14 } },
-    { selector: 'node.group:selected', style: { 'border-style': 'solid', 'border-width': 2.5, 'background-opacity': 0.13 } },
+    { selector: 'node.group:selected', style: { 'border-width': 3.5, 'border-opacity': 1, 'background-opacity': 0.2 } },
     { selector: 'node.note', style: {
       shape: 'round-rectangle', 'background-color': '#fde68a', 'border-width': 0, label: 'data(text)',
       'text-wrap': 'wrap', 'text-max-width': 196, color: '#1f2937', 'font-size': 12, width: 220, height: 'data(h)',
@@ -84,7 +84,9 @@ const cy = cytoscape({
       'line-style': 'dashed', 'line-dash-pattern': [3, 4], 'line-color': '#7b8494', 'target-arrow-color': '#7b8494',
       'target-arrow-shape': 'vee', label: 'data(label)', 'font-size': 10, color: '#9aa1ad',
       'text-background-color': '#0f1115', 'text-background-opacity': 0.8, 'text-background-padding': 2 } },
-    { selector: 'edge.user', style: { 'line-color': '#b6bfcc', 'target-arrow-color': '#b6bfcc', width: 2, 'line-style': 'solid' } },
+    { selector: 'edge.user', style: {
+      'line-color': '#c8cfda', 'target-arrow-color': '#c8cfda', width: 3, 'line-style': 'solid', 'arrow-scale': 1.4,
+      'font-size': 13, 'font-weight': 'bold', color: '#e5e7eb', 'text-background-opacity': 0.95 } },
     { selector: 'edge:selected', style: { 'line-color': '#fff', 'target-arrow-color': '#fff' } },
     { selector: '.cdnd-drop-target', style: { 'border-style': 'solid', 'border-width': 3, 'background-opacity': 0.2 } },
   ],
