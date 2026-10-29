@@ -103,9 +103,32 @@ def build(root: Path) -> tuple[Path, Path]:
     return home, proj
 
 
+def team_layout(root: Path) -> None:
+    """Boxes, nesting, group-to-group links and a note, as if a user had arranged the graph."""
+    a = lambda i: f"agent:demo{i:02d}-0000-4000-8000-000000000000"
+    groups = {"group:lead": ("Leads", "#6366f1"), "group:squad": ("Refactor squad", "#a855f7"),
+              "group:backend": ("Backend", "#3b82f6"), "group:qa": ("QA", "#f59e0b"),
+              "group:investigate": ("Investigations", "#14b8a6"), "group:release": ("Release", "#22c55e")}
+    parents = {a(4): "group:lead", "sub:d1a6": "group:lead",
+               "group:backend": "group:squad", "group:qa": "group:squad",
+               a(0): "group:backend", a(2): "group:backend", a(1): "group:qa",
+               a(3): "group:investigate", a(6): "group:investigate",
+               a(5): "group:release", "agent:demo99-0000-4000-8000-000000000000": "group:release",
+               "note:ship": "group:release"}
+    links = [("group:lead", "group:squad", "assigns"), ("group:lead", "group:investigate", "assigns"),
+             ("group:backend", "group:qa", "hands off"), ("group:squad", "group:release", "ships via"),
+             ("group:investigate", "group:release", "")]
+    (root / "layout.json").write_text(json.dumps({
+        "positions": {}, "hidden": [], "parents": parents,
+        "groups": {g: {"label": l, "color": c} for g, (l, c) in groups.items()},
+        "links": [{"id": f"link:{i}", "source": s, "target": t, "label": l} for i, (s, t, l) in enumerate(links)],
+        "notes": {"note:ship": {"text": "Ship Friday once QA signs off", "parent": "group:release"}}}))
+
+
 def main() -> int:
     root = Path(tempfile.mkdtemp(prefix="agentgraph-demo-"))
     home, proj = build(root)
+    team_layout(root)
     os.environ["CLAUDE_CONFIG_DIR"] = str(home)
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from agentgraph.__main__ import main as agentgraph_main
