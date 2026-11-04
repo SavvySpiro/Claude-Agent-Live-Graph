@@ -111,7 +111,7 @@ cy.compoundDragAndDrop({
   dropSibling: () => false,
   outThreshold: 40,
 });
-cy.on('cdnddrop', 'node', (e, target) => { layout.parents[e.target.id()] = target.id(); save(); });
+cy.on('cdnddrop', 'node', (e, target) => { if (!target || target.empty()) return; layout.parents[e.target.id()] = target.id(); save(); });
 cy.on('cdndout', 'node', (e) => { delete layout.parents[e.target.id()]; save(); });
 
 // ---------------------------------------------------------------- layout persistence
