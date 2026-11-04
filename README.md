@@ -115,7 +115,7 @@ Over SSH, use the *Copy* button in the side panel and run `claude attach <id>` i
 | do this | to |
 |---|---|
 | drag a node | move it (positions are saved) |
-| drag a node into or out of a box | change its group |
+| drag a node into or out of a box | change its group. Dropping a node well clear of the others in its box takes it out, instead of stretching the box |
 | shift-drag on the background | select several nodes |
 | **▭ Draw box** (`B`), then drag a rectangle | box everything inside it |
 | **Group selected** (`G`) | box the selected nodes and pack them together; boxes can be nested |
@@ -124,7 +124,7 @@ Over SSH, use the *Copy* button in the side panel and run `claude attach <id>` i
 | **Hierarchy** (`H`) | top-down layered layout that follows the links, inside and between boxes |
 | **Groups** | pack each box's contents into tidy rows, then lay the boxes out side by side with the files underneath |
 | **Tidy files** | line the file nodes up in a grid |
-| **folders** toggle | box the files by the folder they are in, nested like the directory tree (folder boxes follow the filesystem, so you cannot regroup their files by hand) |
+| **folders** toggle | box the files by the folder they are in, nested like the directory tree. The watched folder's own files stay loose, and each top-level folder gets a box. Each top-level folder has its own colour, and subfolders are lighter shades of it. Click a folder box to pick a different colour for it and its subfolders. Folder boxes follow the filesystem, so you cannot regroup their files by hand |
 | click | details panel: purpose, current step, recent tool calls, edits, original prompt |
 | double-click an agent | open it in a terminal (`claude attach`) |
 | right-click | context menu: attach, copy the attach command, move into a box, link, hide, … |

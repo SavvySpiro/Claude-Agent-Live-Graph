@@ -16,6 +16,11 @@ const CATS = {
 };
 const EDGE_COLOR = CATS.reporting.c;
 const GROUP_COLORS = ['#a855f7', '#3b82f6', '#14b8a6', '#f59e0b', '#ec4899', '#22c55e', '#ef4444', '#94a3b8'];
+// Default hues for top-level folders (cooler than the box colours, so folders don't read as your boxes).
+const FOLDER_COLORS = ['#38bdf8', '#34d399', '#fbbf24', '#f472b6', '#a78bfa', '#fb923c', '#2dd4bf', '#f87171'];
+// Mix a #rrggbb colour toward white by t (0..1).
+const tint = (hex, t) => '#' + [1, 3, 5].map((i) => Math.round(parseInt(hex.slice(i, i + 2), 16) * (1 - t) + 255 * t)
+  .toString(16).padStart(2, '0')).join('');
 const POLL_MS = 2000;
 const CARD_W = 250, CARD_H = 132;
 
@@ -67,11 +72,13 @@ const cy = cytoscape({
       'corner-radius': 14 } },
     { selector: 'node.group:selected', style: { 'border-style': 'solid', 'border-width': 2.5, 'background-opacity': 0.13 } },
     { selector: 'node.folder', style: {
-      shape: 'round-rectangle', 'background-color': '#8b95a7', 'background-opacity': 0.05, 'border-width': 1,
-      'border-color': '#4a5263', label: 'data(label)', 'text-valign': 'top', 'text-halign': 'center', 'text-margin-y': -4,
-      'font-family': 'ui-monospace, SFMono-Regular, Menlo, monospace', 'font-size': 12, color: '#9aa3b2', padding: 18,
-      'min-width': 120, 'min-height': 50, 'corner-radius': 8 } },
-    { selector: 'node.folder:selected', style: { 'border-color': '#c9ced6', 'border-width': 2, 'background-opacity': 0.1 } },
+      // fills stack, so each level of nesting reads a step brighter than its parent
+      shape: 'round-rectangle', 'background-color': 'data(color)', 'background-opacity': 0.07, 'border-width': 1.5,
+      'border-color': 'data(color)', 'border-opacity': 0.75, label: 'data(label)', 'text-valign': 'top', 'text-halign': 'center',
+      'text-margin-y': -4, 'font-family': 'ui-monospace, SFMono-Regular, Menlo, monospace', 'font-size': 12, color: 'data(color)',
+      padding: 18, 'min-width': 120, 'min-height': 50, 'corner-radius': 8 } },
+    { selector: 'node.folder[depth > 0]', style: { 'border-width': 1, 'font-size': 11.5 } },
+    { selector: 'node.folder:selected', style: { 'border-color': '#fff', 'border-opacity': 1, 'border-width': 2, 'background-opacity': 0.14 } },
     { selector: 'node.note', style: {
       shape: 'round-rectangle', 'background-color': '#fde68a', 'border-width': 0, label: 'data(text)',
       'text-wrap': 'wrap', 'text-max-width': 196, color: '#1f2937', 'font-size': 12, width: 220, height: 'data(h)',
@@ -150,7 +157,32 @@ function savePositions() {
   if (cy.nodes('.note').length) cy.nodes('.note').forEach((n) => { if (layout.notes[n.id()]) layout.notes[n.id()].parent = n.data('parent') || null; });
   save();
 }
-cy.on('free', 'node', savePositions);
+// A node dropped well clear of the rest of its box leaves the box (one level per gap) instead of stretching it.
+const LEAVE_GAP = 90;
+function leaveIfFar(n) {
+  for (let guard = 0; guard < 10; guard++) {
+    const box = n.parent();
+    if (box.empty() || !box.hasClass('group')) return;
+    const sibs = box.children().not(n);
+    if (sibs.empty()) return;
+    const a = n.boundingBox(), b = sibs.boundingBox();
+    const gap = Math.max(b.x1 - a.x2, a.x1 - b.x2, b.y1 - a.y2, a.y1 - b.y2);
+    if (gap < LEAVE_GAP) return;
+    removeFromGroup(n.id());
+  }
+}
+cy.on('free', 'node', (e) => {
+  savePositions();
+  const n = e.target;
+  if (n.hasClass('folder') || n.parent('.folder').nonempty()) return;
+  // after the drag-and-drop extension has finished with the gesture, or the move doesn't stick
+  setTimeout(() => {
+    const was = n.data('parent');
+    if (n.removed()) return;
+    leaveIfFar(n);
+    if (n.data('parent') !== was && panelId === n.id()) showPanel(panelId, true);
+  }, 0);
+});
 
 function noteHeight(text) {
   const lines = String(text || ' ').split('\n').reduce((a, l) => a + Math.max(1, Math.ceil(l.length / 30)), 0);
@@ -256,18 +288,31 @@ function folderTree(s, fileDefs) {
   }
   const defs = [];
   const base = (key) => key.slice(key.lastIndexOf('/') + 1);
-  const emit = (d, parent, prefix) => {
-    const name = d.key ? base(d.key) : (s.watchDir || '').replace(/\/+$/, '').split('/').pop() || '.';
-    if (!d.files.length && d.subs.size === 1) { emit(tree.get([...d.subs][0]), parent, `${prefix}${name}/`); return; }
+  // Colour: each top-level folder gets its own hue, subfolders inherit it a shade lighter per level;
+  // a colour picked for a folder (layout.folderColors) applies to it and everything below it.
+  const picked = layout.folderColors || {};
+  const emit = (d, parent, prefix, hue, depth) => {
+    const name = base(d.key);
+    if (!d.files.length && d.subs.size === 1) { emit(tree.get([...d.subs][0]), parent, `${prefix}${name}/`, hue, depth); return; }
     if (!d.files.length && !d.subs.size) return;
     const id = `dir:${d.key}`;
-    defs.push({ group: 'nodes', classes: 'folder', data: { id, type: 'folder', label: `${prefix}${name}/`, path: d.key, parent } });
+    if (picked[id]) hue = picked[id];
+    defs.push({ group: 'nodes', classes: 'folder', data: { id, type: 'folder', label: `${prefix}${name}/`, path: d.key, parent,
+      depth, base: hue, color: tint(hue, Math.min(0.55, depth * 0.18)) } });
     d.files.forEach((fd) => { fd.def.data.parent = id; });
-    [...d.subs].sort().forEach((k) => emit(tree.get(k), id, ''));
+    [...d.subs].sort().forEach((k) => emit(tree.get(k), id, '', hue, depth + 1));
   };
-  if (s.watchDir) emit(tree.get(''), undefined, '');
+  if (s.watchDir) {
+    // No box for the watched folder itself (it would wrap everything into one unit): its files sit loose
+    // and its subfolders are the top-level boxes. `parent: undefined` still marks them as folder-placed.
+    const root = tree.get('');
+    root.files.forEach((fd) => { fd.def.data.parent = undefined; });
+    [...root.subs].sort().forEach((k, i) => emit(tree.get(k), undefined, '', FOLDER_COLORS[i % FOLDER_COLORS.length], 0));
+  }
   if (outside.length) {
-    defs.push({ group: 'nodes', classes: 'folder', data: { id: 'dir:(outside)', type: 'folder', label: 'outside the watched folder', path: '', parent: undefined } });
+    const c = picked['dir:(outside)'] || '#94a3b8';
+    defs.push({ group: 'nodes', classes: 'folder', data: { id: 'dir:(outside)', type: 'folder', label: 'outside the watched folder', path: '',
+      parent: undefined, depth: 0, base: c, color: c } });
     outside.forEach((fd) => { fd.def.data.parent = 'dir:(outside)'; fd.def.data.outside = true; });
   }
   return defs;
@@ -335,7 +380,7 @@ function sync() {
     cy.nodes('.agent, .file, .folder').forEach((n) => { if (!n.removed() && !nodes.has(n.id())) n.remove(); });
     // Folder ids are paths relative to the watched folder, so after a folder change a box can need to go
     // inside what used to be its own child. Lift everything that changes parent to the top first, then
-    // re-parent in `nodes` order (parents first); moving one at a time could make a cycle, which hangs cytoscape.
+    // re-parent in `nodes` order (parents first, once new boxes are added); moving one at a time could make a cycle, which hangs cytoscape.
     const reparent = [];
     for (const [id, def] of nodes) {
       const el = cy.getElementById(id);
@@ -344,7 +389,6 @@ function sync() {
         reparent.push([el, def.data.parent]);
       }
     }
-    for (const [el, parent] of reparent) if (parent) el.move({ parent });
     for (const [id, def] of nodes) {
       const el = cy.getElementById(id);
       const fixed = 'parent' in def.data;  // folder mode decides the parent, not the saved layout
@@ -355,6 +399,8 @@ function sync() {
       def.position = layout.positions[id] ? { ...layout.positions[id] } : placeNew(def);
       cy.add(def).scratch('_cls', def.classes);
     }
+    // after the adds, so boxes that are new this time (e.g. folders just switched on) exist to move into
+    for (const [el, parent] of reparent) if (parent && cy.getElementById(parent).nonempty()) el.move({ parent });
     for (const [id, def] of edges) {
       const el = cy.getElementById(id);
       if (el.nonempty()) update(el, def); else cy.add(def).scratch('_cls', def.classes);
@@ -567,15 +613,15 @@ function groupsLayout() {
     packRows(sorted, { x: o.cx, y: o.cy }, { gapX: gap, maxW: rowWidth(sorted, gap, container ? 2.2 : 1.8) });
   };
   arrange(null);
-  if (foldersOn()) packFolders();
-  tidyFiles(cy.nodes('.file').filter((n) => !n.isChild()), true);
+  if (foldersOn()) packFolders();  // also places the watched folder's own (unboxed) files
+  else tidyFiles(cy.nodes('.file').filter((n) => !n.isChild()), true);
   done();
 }
 
 // Folder mode: pack every folder bottom-up (its files alphabetically, then its subfolders), then lay the
 // top-level folders out in a row under everything else.
 function tidyFolders() {
-  if (!cy.nodes('.folder').length) return;
+  if (!cy.nodes('.folder, .file').length) return;
   const done = animateFrom();
   packFolders();
   done();
@@ -583,7 +629,8 @@ function tidyFolders() {
 
 function packFolders() {
   const roots = cy.nodes('.folder').orphans();
-  if (!roots.length) return;
+  const looseFiles = cy.nodes('.file').filter((n) => !n.isChild());  // files right in the watched folder
+  if (!roots.length && !looseFiles.length) return;
   const place = packRows;
   const byLabel = (a, b) => a.data('label').localeCompare(b.data('label'));
   const pack = (folder) => {
@@ -596,10 +643,18 @@ function packFolders() {
     place(files.union(subs), { x: o.cx, y: o.cy }, { gapX: 24, gapY: 0, maxW });
   };
   roots.forEach(pack);
-  const rest = cy.nodes().difference(roots.union(roots.descendants()));
+  const rest = cy.nodes().difference(roots.union(roots.descendants()).union(looseFiles));
   const bb = rest.nonempty() ? rest.boundingBox() : { x1: 0, x2: 0, y2: 0 };
+  const cx = (bb.x1 + bb.x2) / 2;
+  let y = bb.y2 + 120;
+  if (looseFiles.length) {  // the watched folder's own files in a grid, then its folders below them
+    const cols = Math.max(1, Math.min(6, Math.ceil(Math.sqrt(looseFiles.length * 2))));
+    place(looseFiles.sort(byLabel), { x: cx, y }, { gapX: 24, gapY: 0, maxW: cols * 320 });
+    y = looseFiles.boundingBox({ includeLabels: true }).y2 + 80;
+  }
+  if (!roots.length) return;
   const rw = roots.reduce((s, n) => s + block(n).w, 0) + 60 * (roots.length - 1);
-  place(roots.sort(byLabel), { x: (bb.x1 + bb.x2) / 2, y: bb.y2 + 120 }, { gapX: 60, gapY: 0, maxW: Math.max(rw, 1) });
+  place(roots.sort(byLabel), { x: cx, y }, { gapX: 60, gapY: 0, maxW: Math.max(rw, 1) });
 }
 
 function tidyFiles(files, instant) {
@@ -1038,6 +1093,10 @@ function folderPanel(el) {
   return `
     <h2 class="mono">${esc(el.data('label'))}</h2>
     ${full ? `<div class="mono" style="color:var(--muted);font-size:11.5px;overflow-wrap:anywhere">${esc(full)}</div>` : ''}
+    <h3>Colour</h3><div class="swatches">${[...FOLDER_COLORS, ...GROUP_COLORS.filter((c) => !FOLDER_COLORS.includes(c))].map((c) =>
+      `<button data-color="${c}" class="${c === el.data('base') ? 'on' : ''}" style="background:${c}" title="${c}"></button>`).join('')}</div>
+    <div style="color:var(--muted);font-size:12px;margin-top:4px">Applies to this folder and its subfolders.
+      ${layout.folderColors?.[el.id()] ? '<button class="link" data-a="folderdefault">Back to default</button>' : ''}</div>
     <h3>Contents</h3><div>${files.length} file(s), ${edited} edited recently, ${el.descendants('.folder').length} subfolder(s).</div>
     <div class="row"><button data-a="tidyfolders">Tidy folders</button><button data-a="hide">Hide these files</button></div>`;
 }
@@ -1084,6 +1143,14 @@ function notePanel(el) {
     <div class="row">${el.data('parent') ? '<button data-a="ungroup">Remove from box</button>' : ''}<button data-a="delnote">Delete note</button></div>`;
 }
 
+function setFolderColor(id, color) {
+  layout.folderColors = layout.folderColors || {};
+  if (color) layout.folderColors[id] = color; else delete layout.folderColors[id];
+  save();
+  sync();
+  showPanel(id);
+}
+
 function wirePanel(el, type) {
   const p = $('#panel');
   const id = el.id();
@@ -1098,6 +1165,7 @@ function wirePanel(el, type) {
       else if (a === 'ungroup-box') ungroup(id);
       else if (a === 'delnote') removeNode(id);
       else if (a === 'tidyfolders') tidyFolders();
+      else if (a === 'folderdefault') setFolderColor(id, null);
       else if (a === 'note') createNote(el.position(), id);
       else if (a === 'dellink') { layout.links = layout.links.filter((l) => l.id !== id); hidePanel(); save(); sync(); }
     };
@@ -1114,6 +1182,9 @@ function wirePanel(el, type) {
         save();
       };
     });
+  }
+  if (type === 'folder') {
+    p.querySelectorAll('[data-color]').forEach((b) => { b.onclick = () => setFolderColor(id, b.dataset.color); });
   }
   if (type === 'note') {
     const ta = p.querySelector('textarea');
@@ -1205,7 +1276,8 @@ $('#dir-form').addEventListener('submit', async (e) => {
   toast(j.watchDir ? `Watching ${j.watchDir}` : 'Not watching a folder');
   $('#dir-input').value = j.watchDir || '';
   await poll();
-  tidyFiles(cy.nodes('.file').filter((n) => !layout.positions[n.id()] && !n.isChild()));
+  if (foldersOn()) tidyFolders();  // a whole new folder tree
+  else tidyFiles(cy.nodes('.file').filter((n) => !layout.positions[n.id()] && !n.isChild()));
 });
 
 document.addEventListener('keydown', (e) => {

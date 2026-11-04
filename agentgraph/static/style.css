@@ -136,3 +136,4 @@ main { position: relative; min-height: 0; }
   #status .keys { display: none; }
   #legend { grid-template-columns: auto; }
 }
+button.link { background: none; border: 0; padding: 0; color: #60a5fa; text-decoration: underline; cursor: pointer; font: inherit; }
