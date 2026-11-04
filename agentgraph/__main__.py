@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import sys
+import urllib.error
 import urllib.request
 import webbrowser
 from pathlib import Path
@@ -49,7 +50,8 @@ def install_service(args) -> int:
     import subprocess
     pkg_root = Path(__file__).resolve().parent.parent
     cmd = [sys.executable, "-m", "agentgraph", "--host", args.host, "--port", str(args.port),
-           "--keep-finished", str(args.keep_finished), "--edge-window", str(args.edge_window)]
+           "--keep-finished", str(args.keep_finished), "--edge-window", str(args.edge_window),
+           "--depth", str(args.depth), "--layout", str(Path(args.layout).expanduser().resolve())]
     if args.dir:
         cmd += ["--dir", os.path.abspath(os.path.expanduser(args.dir))]
     if args.summarize:
@@ -123,10 +125,18 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     url = f"http://{args.host}:{args.port}"
 
+    if (args.install_skill or args.install_service) and args.dir and not os.path.isdir(os.path.expanduser(args.dir)):
+        print(f"error: {args.dir} is not a directory", file=sys.stderr)
+        return 2
+
     if args.install_skill:
         SKILL_DIR.mkdir(parents=True, exist_ok=True)
         pkg_root = Path(__file__).resolve().parent.parent
         dir_arg = f" --dir '{os.path.abspath(os.path.expanduser(args.dir))}'" if args.dir else ""
+        if args.host != ap.get_default("host"):
+            dir_arg = f" --host {args.host}" + dir_arg
+        if args.layout != ap.get_default("layout"):
+            dir_arg = f" --layout '{Path(args.layout).expanduser().resolve()}'" + dir_arg
         python = f"cd '{pkg_root}' && {sys.executable}"
         (SKILL_DIR / "SKILL.md").write_text(SKILL_MD.format(python=python, port=args.port, dir_arg=dir_arg))
         print(f"installed {SKILL_DIR / 'SKILL.md'} — type /agent-graph in any Claude session")
@@ -153,9 +163,18 @@ def main(argv=None) -> int:
     if already_running(url):
         print(f"agentgraph already running at {url}")
         if args.dir and watch_dir:
-            req = urllib.request.Request(url + "/api/watch", json.dumps({"dir": watch_dir}).encode(),
+            # The server resolves relative paths against its own cwd, so send an absolute one.
+            req = urllib.request.Request(url + "/api/watch", json.dumps({"dir": os.path.abspath(watch_dir)}).encode(),
                                          {"Content-Type": "application/json"})
-            urllib.request.urlopen(req, timeout=3).read()
+            try:
+                urllib.request.urlopen(req, timeout=3).read()
+            except urllib.error.HTTPError as e:
+                try:
+                    msg = json.loads(e.read()).get("error") or e.reason
+                except ValueError:
+                    msg = e.reason
+                print(f"error: server rejected --dir: {msg}", file=sys.stderr)
+                return 1
         if args.open:
             open_browser(url)
         return 0
