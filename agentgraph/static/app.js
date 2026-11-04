@@ -457,17 +457,85 @@ function createGroup(members, label) {
   const bb = members.nonempty() ? members.boundingBox() : null;
   cy.add({ group: 'nodes', classes: 'group', data: { id, type: 'group', label, color, parent: common || undefined },
     position: bb ? { x: (bb.x1 + bb.x2) / 2, y: (bb.y1 + bb.y2) / 2 } : cy.extent() && centerOfView() });
-  members.forEach((n) => {
-    if (n.id() === id || n.ancestors().some((a) => members.contains(a))) return;  // nested ones move with their box
+  const units = members.filter((n) => n.id() !== id && !n.ancestors().some((a) => members.contains(a)));  // nested ones move with their box
+  units.forEach((n) => {
     n.move({ parent: id });
     layout.parents[n.id()] = id;
   });
-  savePositions();
+  if (!tidyGroup(cy.getElementById(id), units)) savePositions();
   cy.elements().unselect();
   cy.getElementById(id).select();
   showPanel(id);
   setTimeout(() => { const i = $('#panel input[name=label]'); if (i) { i.focus(); i.select(); } }, 30);
   return id;
+}
+
+// Shift a node, or every leaf inside a box, by (dx, dy).
+function shiftUnit(n, dx, dy) {
+  (n.isParent() ? n.descendants().filter((d) => !d.isParent()) : n).forEach((d) => {
+    const q = d.position();
+    d.position({ x: q.x + dx, y: q.y + dy });
+  });
+}
+
+const overlaps = (a, b) => a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2 && b.y1 < a.y2;
+
+// A new box is sized by its members, so scattered members make a box that swallows unrelated nodes.
+// If that happens, pack the members into a grid around where they were, then push any sibling that still
+// overlaps the box out of it. Returns true if anything moved (positions are then animated and saved).
+function tidyGroup(g, units) {
+  const container = g.parent();
+  const siblings = () => (container.nonempty() ? container.children() : cy.nodes().orphans()).filter((n) => n.id() !== g.id());
+  const intruders = () => { const bb = g.boundingBox({ includeLabels: true }); return siblings().filter((n) => overlaps(bb, n.boundingBox({ includeLabels: true }))); };
+  if (!intruders().length) return false;
+
+  const leaves = cy.nodes().filter((n) => !n.isParent());
+  const before = new Map(leaves.map((n) => [n.id(), { ...n.position() }]));
+
+  // 1. pack members row by row, keeping their rough reading order
+  const gap = 30;
+  const items = units.map((n) => {
+    const bb = n.boundingBox({ includeLabels: true });
+    return { n, w: bb.w, h: bb.h, cx: (bb.x1 + bb.x2) / 2, cy: (bb.y1 + bb.y2) / 2 };
+  }).sort((a, b) => (Math.abs(a.cy - b.cy) > 40 ? a.cy - b.cy : a.cx - b.cx));
+  const cols = Math.ceil(Math.sqrt(items.length));
+  const rows = [];
+  items.forEach((it, i) => (rows[Math.floor(i / cols)] = rows[Math.floor(i / cols)] || []).push(it));
+  const rowW = rows.map((r) => r.reduce((s, it) => s + it.w, 0) + gap * (r.length - 1));
+  const rowH = rows.map((r) => Math.max(...r.map((it) => it.h)));
+  const totalH = rowH.reduce((s, h) => s + h, 0) + gap * (rows.length - 1);
+  const ox = items.reduce((s, it) => s + it.cx, 0) / items.length;
+  const oy = items.reduce((s, it) => s + it.cy, 0) / items.length;
+  let y = oy - totalH / 2;
+  rows.forEach((r, ri) => {
+    let x = ox - rowW[ri] / 2;
+    r.forEach((it) => {
+      shiftUnit(it.n, x + it.w / 2 - it.cx, y + rowH[ri] / 2 - it.cy);
+      x += it.w + gap;
+    });
+    y += rowH[ri] + gap;
+  });
+
+  // 2. push remaining overlapping siblings out, along whichever side is closest
+  for (let pass = 0; pass < 4; pass++) {
+    const hit = intruders();
+    if (!hit.length) break;
+    const bb = g.boundingBox({ includeLabels: true });
+    hit.forEach((n) => {
+      const nb = n.boundingBox({ includeLabels: true });
+      const moves = [[bb.x2 + gap - nb.x1, 0], [bb.x1 - gap - nb.x2, 0], [0, bb.y2 + gap - nb.y1], [0, bb.y1 - gap - nb.y2]];
+      const [dx, dy] = moves.reduce((m, v) => (Math.abs(v[0] + v[1]) < Math.abs(m[0] + m[1]) ? v : m));
+      shiftUnit(n, dx, dy);
+    });
+  }
+
+  // animate from the old positions to the new ones
+  const after = new Map(leaves.map((n) => [n.id(), { ...n.position() }]));
+  const moved = leaves.filter((n) => before.get(n.id()).x !== after.get(n.id()).x || before.get(n.id()).y !== after.get(n.id()).y);
+  moved.forEach((n) => n.position(before.get(n.id())));
+  moved.forEach((n) => n.animate({ position: after.get(n.id()), duration: 300 }));
+  setTimeout(savePositions, 330);
+  return true;
 }
 
 function ungroup(id) {
