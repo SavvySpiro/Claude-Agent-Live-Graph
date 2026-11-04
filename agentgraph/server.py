@@ -38,16 +38,22 @@ class LayoutStore:
             os.replace(tmp, self.path)
 
 
+def _no_cache(resp: Response) -> Response:
+    """Make the browser revalidate on every load, so a refresh always picks up edited UI files."""
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 def create_app(collector: Collector, layout: LayoutStore, terminal_template: str | None = None) -> Flask:
     app = Flask(__name__, static_folder=None)
 
     @app.get("/")
     def index():
-        return send_from_directory(STATIC, "index.html")
+        return _no_cache(send_from_directory(STATIC, "index.html"))
 
     @app.get("/static/<path:p>")
     def static_files(p):
-        return send_from_directory(STATIC, p)
+        return _no_cache(send_from_directory(STATIC, p))
 
     @app.get("/api/graph")
     def graph():
@@ -109,6 +115,7 @@ def create_app(collector: Collector, layout: LayoutStore, terminal_template: str
 
     @app.get("/healthz")
     def healthz():
-        return Response("agentgraph", mimetype="text/plain")
+        # the pid lets `agentgraph --restart` stop a server it didn't start
+        return Response(f"agentgraph {os.getpid()}", mimetype="text/plain")
 
     return app

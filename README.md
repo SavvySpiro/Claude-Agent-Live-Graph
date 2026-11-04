@@ -60,6 +60,7 @@ used is remembered.
 | `--terminal TPL` | Terminal used for attaching, e.g. `'kitty -e {cmd}'`. By default it auto-detects gnome-terminal, kitty, wezterm, alacritty, konsole, xterm, … and Terminal.app on macOS. |
 | `--port`, `--host` | Where to serve (default `127.0.0.1:8765`). |
 | `--layout FILE` | Where boxes, notes and positions are saved (default `~/.config/agentgraph/layout.json`). |
+| `--restart` | Stop the running server and start it again so code changes load (restarts the systemd service if that is what is running). Edits to files in `static/` only need a browser refresh. |
 | `--dump` | Print one JSON snapshot and exit, for debugging. |
 
 ### Open it from Claude
