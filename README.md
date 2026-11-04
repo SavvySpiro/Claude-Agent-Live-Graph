@@ -3,10 +3,9 @@
 A live, editable graph of the [Claude Code](https://claude.com/claude-code) agents running on your machine, and
 the files they are changing.
 
-![agentgraph showing demo agents in nested boxes, linked team-to-team, with the files they edit](docs/screenshot.png)
+![agentgraph: three boxes of demo agents, Planning hands off to Build, which ships via Ship, with the files each agent is editing](docs/after-hierarchy.png)
 
-*Made-up agents from `scripts/demo.py`, arranged with boxes (Backend and QA nested inside Refactor squad),
-group-to-group hierarchy links, a note, and the **Hierarchy** layout.*
+*Made-up agents from `scripts/demo.py`, grouped into boxes and laid out with **Hierarchy**.*
 
 - **Agent nodes** (cards). The title is the agent's name and id. The body says what the agent is working toward,
   plus its current step (`▸ …`). The colour shows what it is doing right now. The legend counts how many agents
@@ -31,8 +30,8 @@ group-to-group hierarchy links, a note, and the **Hierarchy** layout.*
 You need Python 3.9 or newer and Claude Code. It works on Linux and macOS.
 
 ```bash
-git clone https://github.com/<you>/agentgraph.git
-cd agentgraph
+git clone https://github.com/SavvySpiro/Claude-Agent-Live-Graph.git
+cd Claude-Agent-Live-Graph
 pip install -e .          # installs Flask and an `agentgraph` command
 ```
 
@@ -124,10 +123,23 @@ Over SSH, use the *Copy* button in the side panel and run `claude attach <id>` i
 | **Hierarchy** (`H`) | top-down layered layout that follows the links, inside and between boxes |
 | **Groups** | force layout that keeps each box together |
 | **Tidy files** | line the file nodes up in a grid |
+| **Fit** (`F`) | zoom to fit the whole graph |
 | click | details panel: purpose, current step, recent tool calls, edits, original prompt |
 | double-click an agent | open it in a terminal (`claude attach`) |
 | right-click | context menu: attach, copy the attach command, move into a box, link, hide, … |
-| `Delete` | remove the selected box (its contents stay), note or link; hide the selected agent or file |
+| `Delete` / `Backspace` | remove the selected box (its contents stay), note or link; hide the selected agent or file |
+
+### Grouping and hierarchy
+
+Put agents into boxes, draw links from one box to another (select the parent box, then the child, then
+**↳ Link**), and press **Hierarchy**. Links between boxes become the top-down order, and each box is packed
+around its own contents. Boxes can nest, and links inside a box are laid out inside it.
+
+| before: boxes and links drawn, positions left messy | after pressing **Hierarchy** |
+|---|---|
+| ![demo graph before the Hierarchy layout: boxes overlap and cards are scattered](docs/before-hierarchy.png) | ![the same graph after Hierarchy: Planning, Build and Ship stacked top to bottom](docs/after-hierarchy.png) |
+
+Run `python3 scripts/demo.py` and press `H` to try it.
 
 ### Colours
 
