@@ -123,10 +123,11 @@ Over SSH, use the *Copy* button in the side panel and run `claude attach <id>` i
 | **Hierarchy** (`H`) | top-down layered layout that follows the links, inside and between boxes |
 | **Groups** | force layout that keeps each box together |
 | **Tidy files** | line the file nodes up in a grid |
+| **Fit** (`F`) | zoom to fit the whole graph |
 | click | details panel: purpose, current step, recent tool calls, edits, original prompt |
 | double-click an agent | open it in a terminal (`claude attach`) |
 | right-click | context menu: attach, copy the attach command, move into a box, link, hide, … |
-| `Delete` | remove the selected box (its contents stay), note or link; hide the selected agent or file |
+| `Delete` / `Backspace` | remove the selected box (its contents stay), note or link; hide the selected agent or file |
 
 ### Grouping and hierarchy
 
