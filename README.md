@@ -118,12 +118,13 @@ Over SSH, use the *Copy* button in the side panel and run `claude attach <id>` i
 | drag a node into or out of a box | change its group |
 | shift-drag on the background | select several nodes |
 | **▭ Draw box** (`B`), then drag a rectangle | box everything inside it |
-| **Group selected** (`G`) | box the selected nodes; boxes can be nested |
+| **Group selected** (`G`) | box the selected nodes and pack them together; boxes can be nested |
 | **✎ Note** (`N`), or right-click the background | add an annotation; edit it in the side panel |
 | select parent, then child, then **↳ Link** (`L`) | add a hierarchy link (between agents or boxes) |
 | **Hierarchy** (`H`) | top-down layered layout that follows the links, inside and between boxes |
 | **Groups** | force layout that keeps each box together |
 | **Tidy files** | line the file nodes up in a grid |
+| **folders** toggle | box the files by the folder they are in, nested like the directory tree (folder boxes follow the filesystem, so you cannot regroup their files by hand) |
 | click | details panel: purpose, current step, recent tool calls, edits, original prompt |
 | double-click an agent | open it in a terminal (`claude attach`) |
 | right-click | context menu: attach, copy the attach command, move into a box, link, hide, … |

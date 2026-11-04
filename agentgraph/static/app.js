@@ -66,6 +66,12 @@ const cy = cytoscape({
       color: 'data(color)', padding: 24, width: 180, height: 100, 'min-width': 180, 'min-height': 100,
       'corner-radius': 14 } },
     { selector: 'node.group:selected', style: { 'border-style': 'solid', 'border-width': 2.5, 'background-opacity': 0.13 } },
+    { selector: 'node.folder', style: {
+      shape: 'round-rectangle', 'background-color': '#8b95a7', 'background-opacity': 0.05, 'border-width': 1,
+      'border-color': '#4a5263', label: 'data(label)', 'text-valign': 'top', 'text-halign': 'center', 'text-margin-y': -4,
+      'font-family': 'ui-monospace, SFMono-Regular, Menlo, monospace', 'font-size': 12, color: '#9aa3b2', padding: 18,
+      'min-width': 120, 'min-height': 50, 'corner-radius': 8 } },
+    { selector: 'node.folder:selected', style: { 'border-color': '#c9ced6', 'border-width': 2, 'background-opacity': 0.1 } },
     { selector: 'node.note', style: {
       shape: 'round-rectangle', 'background-color': '#fde68a', 'border-width': 0, label: 'data(text)',
       'text-wrap': 'wrap', 'text-max-width': 196, color: '#1f2937', 'font-size': 12, width: 220, height: 'data(h)',
@@ -104,7 +110,8 @@ cy.nodeHtmlLabel([{
 }]);
 
 cy.compoundDragAndDrop({
-  grabbedNode: (n) => !n.hasClass('group'),
+  // folder boxes and the files in them follow the filesystem, so they can't be dropped into user boxes
+  grabbedNode: (n) => !n.hasClass('group') && !n.hasClass('folder') && !n.parent('.folder').nonempty(),
   dropTarget: (n) => n.hasClass('group'),
   dropSibling: () => false,
   outThreshold: 40,
@@ -176,15 +183,21 @@ function desired(s) {
       category: a.category, status: a.status, sub: a.id.startsWith('sub:'), parentAgent: a.parent || '' } });
   }
   const touched = new Set(s.edges.map((e) => e.target));
+  const fileDefs = [];
   for (const f of s.files) {
     const isTouched = touched.has(f.id);
     if (hidden.has(f.id) || (!allFiles && !isTouched)) continue;
     const cls = ['file'];
     if (isTouched) cls.push('touched'); else if (s.generatedAt - f.mtime < 90) cls.push('changed');
     if (!f.exists) cls.push('missing');
-    const label = trunc(f.label, 42);
-    nodes.set(f.id, { group: 'nodes', classes: cls.join(' '), data: {
-      id: f.id, type: 'file', label, w: Math.round(Math.min(300, 34 + 6.7 * label.length)) } });
+    fileDefs.push({ f, def: { group: 'nodes', classes: cls.join(' '), data: { id: f.id, type: 'file' } } });
+  }
+  if (foldersOn()) folderTree(s, fileDefs).forEach((def) => nodes.set(def.data.id, def));
+  for (const { f, def } of fileDefs) {
+    const label = trunc(def.data.parent && !def.data.outside ? f.name : f.label, 42);
+    delete def.data.outside;
+    Object.assign(def.data, { label, w: Math.round(Math.min(300, 34 + 6.7 * label.length)) });
+    nodes.set(f.id, def);
   }
   for (const e of s.edges) {
     if (!nodes.has(e.source) || !nodes.has(e.target)) continue;
@@ -209,6 +222,46 @@ function desired(s) {
   return { nodes, edges };
 }
 
+const foldersOn = () => $('#opt-folders').checked;
+
+// Folder boxes for the visible files: one box per directory (the watched folder is the outer box), with a
+// chain of folders that hold nothing but one subfolder collapsed into a single "a/b/" box. Sets each file
+// def's parent and returns the folder defs, parents first. Files outside the watched folder share one box.
+function folderTree(s, fileDefs) {
+  const tree = new Map();
+  const dir = (key) => {
+    if (tree.has(key)) return tree.get(key);
+    const d = { key, files: [], subs: new Set() };
+    tree.set(key, d);
+    if (key) dir(key.includes('/') ? key.slice(0, key.lastIndexOf('/')) : '').subs.add(key);
+    return d;
+  };
+  dir('');
+  const outside = [];
+  for (const fd of fileDefs) {
+    const rel = fd.f.label;
+    if (!s.watchDir || rel === '..' || rel.startsWith('../') || rel.startsWith('/')) { outside.push(fd); continue; }
+    dir(rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '').files.push(fd);
+  }
+  const defs = [];
+  const base = (key) => key.slice(key.lastIndexOf('/') + 1);
+  const emit = (d, parent, prefix) => {
+    const name = d.key ? base(d.key) : (s.watchDir || '').replace(/\/+$/, '').split('/').pop() || '.';
+    if (!d.files.length && d.subs.size === 1) { emit(tree.get([...d.subs][0]), parent, `${prefix}${name}/`); return; }
+    if (!d.files.length && !d.subs.size) return;
+    const id = `dir:${d.key}`;
+    defs.push({ group: 'nodes', classes: 'folder', data: { id, type: 'folder', label: `${prefix}${name}/`, path: d.key, parent } });
+    d.files.forEach((fd) => { fd.def.data.parent = id; });
+    [...d.subs].sort().forEach((k) => emit(tree.get(k), id, ''));
+  };
+  if (s.watchDir) emit(tree.get(''), undefined, '');
+  if (outside.length) {
+    defs.push({ group: 'nodes', classes: 'folder', data: { id: 'dir:(outside)', type: 'folder', label: 'outside the watched folder', path: '', parent: undefined } });
+    outside.forEach((fd) => { fd.def.data.parent = 'dir:(outside)'; fd.def.data.outside = true; });
+  }
+  return defs;
+}
+
 function makePlacer() {
   const cursors = {};
   const perParent = {};
@@ -227,6 +280,16 @@ function makePlacer() {
       const p = cy.getElementById(d.parentAgent).position();
       return { x: p.x + (k - 1) * (CARD_W + 30) - 60, y: p.y + CARD_H + 70 };
     }
+    if (d.type === 'file' && d.parent) {
+      // stack new files under the lowest file already in their folder (or the nearest folder above it)
+      for (let f = cy.getElementById(d.parent); f.nonempty(); f = cy.getElementById(f.data('parent') || '')) {
+        const files = f.descendants('.file');
+        if (!files.length) continue;
+        let minX = Infinity, maxY = -Infinity;
+        files.forEach((n) => { const p = n.position(); minX = Math.min(minX, p.x); maxY = Math.max(maxY, p.y); });
+        return { x: minX, y: maxY + 40 };
+      }
+    }
     const key = d.type;
     if (!cursors[key]) {
       cursors[key] = key === 'agent' ? start('node.agent', CARD_W + 30, CARD_H + 50, () => 0) : start('node.file', 310, 48, lowestAgent);
@@ -241,7 +304,7 @@ function makePlacer() {
 
 function update(el, def) {
   const patch = {};
-  for (const [k, v] of Object.entries(def.data)) if (k !== 'id' && k !== 'source' && k !== 'target' && el.data(k) !== v) patch[k] = v;
+  for (const [k, v] of Object.entries(def.data)) if (k !== 'id' && k !== 'source' && k !== 'target' && k !== 'parent' && el.data(k) !== v) patch[k] = v;
   if (Object.keys(patch).length) el.data(patch);
   if (el.scratch('_cls') !== def.classes) {
     // keep drag-and-drop helper classes while a drag is in flight
@@ -257,12 +320,19 @@ function sync() {
   const placeNew = makePlacer();
   cy.batch(() => {
     cy.edges().forEach((e) => { if (!edges.has(e.id())) e.remove(); });
-    cy.nodes('.agent, .file').forEach((n) => { if (!nodes.has(n.id())) n.remove(); });
+    // a removed folder takes its files with it; any still wanted are re-added below
+    cy.nodes('.agent, .file, .folder').forEach((n) => { if (!n.removed() && !nodes.has(n.id())) n.remove(); });
     for (const [id, def] of nodes) {
       const el = cy.getElementById(id);
-      if (el.nonempty()) { update(el, def); continue; }
+      const fixed = 'parent' in def.data;  // folder mode decides the parent, not the saved layout
+      if (el.nonempty()) {
+        update(el, def);
+        if (fixed && (el.data('parent') || undefined) !== def.data.parent) el.move({ parent: def.data.parent ?? null });
+        continue;
+      }
       const parent = layout.parents[id];
-      if (parent && cy.getElementById(parent).nonempty()) def.data.parent = parent;
+      if (!fixed && parent && cy.getElementById(parent).nonempty()) def.data.parent = parent;
+      if (def.data.type === 'folder') { cy.add(def).scratch('_cls', def.classes); continue; }
       def.position = layout.positions[id] ? { ...layout.positions[id] } : placeNew(def);
       cy.add(def).scratch('_cls', def.classes);
     }
@@ -416,6 +486,7 @@ function hierarchyLayout() {
 
 function runLayout(kind) {
   if (kind === 'hierarchy') { hierarchyLayout(); return; }
+  if (kind === 'files' && foldersOn()) { tidyFolders(); return; }
   if (kind !== 'groups') {
     tidyFiles(cy.nodes('.file').filter((n) => !n.isChild()));
     savePositions();
@@ -427,6 +498,40 @@ function runLayout(kind) {
     nodeDimensionsIncludeLabels: true, fit: true });
   l.one('layoutstop', () => { savePositions(); cy.fit(undefined, 40); });
   l.run();
+}
+
+// Folder mode: pack every folder bottom-up (its files alphabetically, then its subfolders), then lay the
+// top-level folders out in a row under everything else.
+function tidyFolders() {
+  const roots = cy.nodes('.folder').orphans();
+  if (!roots.length) return;
+  const leaves = cy.nodes().filter((n) => !n.isParent());
+  const before = new Map(leaves.map((n) => [n.id(), { ...n.position() }]));
+  const block = (n) => { const bb = n.boundingBox({ includeLabels: true }); return { w: Math.max(bb.w, 40), h: Math.max(bb.h, 30), cx: (bb.x1 + bb.x2) / 2, cy: (bb.y1 + bb.y2) / 2 }; };
+  const place = (kids, origin, opts) => {
+    const items = kids.map((n, i) => ({ id: n.id(), n, x: i, ...block(n) }));
+    const pos = layered(items, [], opts);
+    items.forEach((it) => { const p = pos.get(it.id); shiftUnit(it.n, origin.x + p.x - it.cx, origin.y + p.y - it.cy); });
+  };
+  const byLabel = (a, b) => a.data('label').localeCompare(b.data('label'));
+  const pack = (folder) => {
+    const subs = folder.children('.folder').sort(byLabel);
+    subs.forEach(pack);
+    const files = folder.children().not('.folder').sort(byLabel);
+    const cols = Math.max(1, Math.min(4, Math.ceil(Math.sqrt(files.length / 2))));
+    const maxW = Math.max(cols * 300, ...subs.map((n) => block(n).w));
+    const o = block(folder);
+    place(files.union(subs), { x: o.cx, y: o.cy }, { gapX: 24, gapY: 0, maxW });
+  };
+  roots.forEach(pack);
+  const rest = cy.nodes().difference(roots.union(roots.descendants()));
+  const bb = rest.nonempty() ? rest.boundingBox() : { x1: 0, x2: 0, y2: 0 };
+  const rw = roots.reduce((s, n) => s + block(n).w, 0) + 60 * (roots.length - 1);
+  place(roots.sort(byLabel), { x: (bb.x1 + bb.x2) / 2, y: bb.y2 + 120 }, { gapX: 60, gapY: 0, maxW: Math.max(rw, 1) });
+  const after = new Map(leaves.map((n) => [n.id(), { ...n.position() }]));
+  leaves.forEach((n) => n.position(before.get(n.id())));
+  leaves.forEach((n) => n.animate({ position: after.get(n.id()), duration: 350 }));
+  setTimeout(() => { savePositions(); cy.animate({ fit: { eles: cy.elements(), padding: 40 }, duration: 250 }); }, 380);
 }
 
 function tidyFiles(files, instant) {
@@ -446,7 +551,9 @@ function tidyFiles(files, instant) {
 
 // ---------------------------------------------------------------- boxes, notes, links
 function createGroup(members, label) {
-  members = members.filter((n) => n.isNode());
+  const all = members.filter((n) => n.isNode());
+  members = all.filter((n) => !n.hasClass('folder') && !n.parent('.folder').nonempty());
+  if (all.length && !members.length) { toast('Folder boxes follow the filesystem — turn off “folders” to box these files'); return null; }
   const id = uid('group');
   const color = GROUP_COLORS[Object.keys(layout.groups).length % GROUP_COLORS.length];
   label = label || `Group ${Object.keys(layout.groups).length + 1}`;
@@ -584,6 +691,13 @@ function addLink(source, target) {
 
 function removeNode(id) {
   const el = cy.getElementById(id);
+  if (el.hasClass('folder')) {
+    el.descendants('.file').forEach((f) => { if (!layout.hidden.includes(f.id())) layout.hidden.push(f.id()); });
+    if (panelId === id) hidePanel();
+    save();
+    sync();
+    return;
+  }
   if (el.hasClass('group')) return ungroup(id);
   if (el.hasClass('note')) {
     el.remove();
@@ -729,12 +843,17 @@ cy.on('cxttap', (e) => {
       items.push(['Ungroup (keep contents)', () => ungroup(id)]);
     }
     if (t.hasClass('note')) items.push(['Edit note', () => { showPanel(id); setTimeout(() => $('#panel textarea')?.focus(), 20); }]);
+    if (t.hasClass('folder')) items.push(['Tidy folders', () => tidyFolders()]);
     items.push(['↳ Link to… (this is the parent)', () => startLink(id)]);
-    const groups = cy.nodes('.group').filter((g) => g.id() !== id && !g.ancestors().contains(t) && g.id() !== t.data('parent'));
-    groups.forEach((g) => items.push([`Move into “${trunc(g.data('label'), 24)}”`, () => moveToGroup(id, g.id())]));
-    if (t.data('parent')) items.push(['Remove from box', () => removeFromGroup(id)]);
+    const inFolder = t.hasClass('folder') || t.parent('.folder').nonempty();
+    if (!inFolder) {
+      const groups = cy.nodes('.group').filter((g) => g.id() !== id && !g.ancestors().contains(t) && g.id() !== t.data('parent'));
+      groups.forEach((g) => items.push([`Move into “${trunc(g.data('label'), 24)}”`, () => moveToGroup(id, g.id())]));
+      if (t.data('parent')) items.push(['Remove from box', () => removeFromGroup(id)]);
+    }
     items.push('-');
     if (t.hasClass('agent') || t.hasClass('file')) items.push(['Hide', () => removeNode(id)]);
+    if (t.hasClass('folder')) items.push(['Hide the files in this folder', () => removeNode(id)]);
     if (t.hasClass('note')) items.push(['Delete note', () => removeNode(id)]);
   }
   showCtx(pos, items);
@@ -806,6 +925,7 @@ function showPanel(id, refresh) {
   else if (type === 'edge') html += edgePanel(el);
   else if (type === 'group') html += groupPanel(el);
   else if (type === 'note') html += notePanel(el);
+  else if (type === 'folder') html += folderPanel(el);
   const scroll = p.scrollTop;
   p.innerHTML = html;
   p.scrollTop = scroll;
@@ -843,6 +963,17 @@ function agentPanel(a) {
     <div class="row">${cy.getElementById(a.id).data('parent') ? '<button data-a="ungroup">Remove from box</button>' : ''}<button data-a="hide">Hide</button></div>`;
 }
 
+function folderPanel(el) {
+  const files = el.descendants('.file');
+  const edited = files.filter('.touched').length;
+  const full = el.id() === 'dir:(outside)' ? '' : [snap.watchDir, el.data('path')].filter(Boolean).join('/');
+  return `
+    <h2 class="mono">${esc(el.data('label'))}</h2>
+    ${full ? `<div class="mono" style="color:var(--muted);font-size:11.5px;overflow-wrap:anywhere">${esc(full)}</div>` : ''}
+    <h3>Contents</h3><div>${files.length} file(s), ${edited} edited recently, ${el.descendants('.folder').length} subfolder(s).</div>
+    <div class="row"><button data-a="tidyfolders">Tidy folders</button><button data-a="hide">Hide these files</button></div>`;
+}
+
 function filePanel(id) {
   const f = snap.files.find((x) => x.id === id);
   if (!f) return '<p>File no longer listed.</p>';
@@ -855,7 +986,7 @@ function filePanel(id) {
     <ul>${edits.map((e) => `<li><span class="k">${esc(agentsById.get(e.source)?.name || e.source)}</span>
       <ul style="margin-top:4px">${e.history.slice().reverse().map((h) => `<li>${esc(h.label)}<div class="when">${esc(h.summary)} · ${ago(h.ts)}</div></li>`).join('')}</ul></li>`).join('')
       || '<li>No agent has edited this recently.</li>'}</ul>
-    <div class="row">${cy.getElementById(id).data('parent') ? '<button data-a="ungroup">Remove from box</button>' : ''}<button data-a="hide">Hide</button></div>`;
+    <div class="row">${cy.getElementById(id).parent('.group').nonempty() ? '<button data-a="ungroup">Remove from box</button>' : ''}<button data-a="hide">Hide</button></div>`;
 }
 
 function edgePanel(el) {
@@ -898,6 +1029,7 @@ function wirePanel(el, type) {
       else if (a === 'ungroup') { removeFromGroup(id); showPanel(id); }
       else if (a === 'ungroup-box') ungroup(id);
       else if (a === 'delnote') removeNode(id);
+      else if (a === 'tidyfolders') tidyFolders();
       else if (a === 'note') createNote(el.position(), id);
       else if (a === 'dellink') { layout.links = layout.links.filter((l) => l.id !== id); hidePanel(); save(); sync(); }
     };
@@ -964,10 +1096,18 @@ document.querySelectorAll('[data-act]').forEach((b) => {
     else if (a === 'unhide') { layout.hidden = []; save(); sync(); }
   };
 });
-$('#opt-allfiles').onchange = $('#opt-idle').onchange = () => {
-  layout.options = { allFiles: $('#opt-allfiles').checked, showIdle: $('#opt-idle').checked };
+const saveOptions = () => {
+  layout.options = { allFiles: $('#opt-allfiles').checked, showIdle: $('#opt-idle').checked, folders: foldersOn() };
   save();
+};
+$('#opt-idle').onchange = () => { saveOptions(); sync(); };
+$('#opt-allfiles').onchange = () => { saveOptions(); sync(); if (foldersOn()) tidyFolders(); };
+$('#opt-folders').onchange = () => {
+  saveOptions();
+  if (panelId && cy.getElementById(panelId).hasClass('folder')) hidePanel();
+  cy.remove('node.folder');  // takes their files along; sync re-adds them with the right parents
   sync();
+  if (foldersOn()) tidyFolders(); else tidyFiles(cy.nodes('.file').filter((n) => !n.isChild()));
 };
 
 function groupSelected() {
@@ -1050,6 +1190,7 @@ $('#legend').addEventListener('click', (e) => {
     if (layout.options) {
       $('#opt-allfiles').checked = layout.options.allFiles !== false;
       $('#opt-idle').checked = layout.options.showIdle !== false;
+      $('#opt-folders').checked = !!layout.options.folders;
     }
   } catch { /* first run */ }
   restoreUserElements();
