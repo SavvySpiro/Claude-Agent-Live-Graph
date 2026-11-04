@@ -122,7 +122,7 @@ Over SSH, use the *Copy* button in the side panel and run `claude attach <id>` i
 | **✎ Note** (`N`), or right-click the background | add an annotation; edit it in the side panel |
 | select parent, then child, then **↳ Link** (`L`) | add a hierarchy link (between agents or boxes) |
 | **Hierarchy** (`H`) | top-down layered layout that follows the links, inside and between boxes |
-| **Groups** | force layout that keeps each box together |
+| **Groups** | pack each box's contents into tidy rows, then lay the boxes out side by side with the files underneath |
 | **Tidy files** | line the file nodes up in a grid |
 | **folders** toggle | box the files by the folder they are in, nested like the directory tree (folder boxes follow the filesystem, so you cannot regroup their files by hand) |
 | click | details panel: purpose, current step, recent tool calls, edits, original prompt |

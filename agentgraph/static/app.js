@@ -493,26 +493,79 @@ function runLayout(kind) {
     cy.fit(undefined, 40);
     return;
   }
-  const l = cy.elements().layout({ name: 'cose', animate: true, animationDuration: 500, nodeRepulsion: () => 12000,
-    idealEdgeLength: () => 150, nestingFactor: 1.1, gravity: 0.35, numIter: 1500, padding: 40, componentSpacing: 90,
-    nodeDimensionsIncludeLabels: true, fit: true });
-  l.one('layoutstop', () => { savePositions(); cy.fit(undefined, 40); });
-  l.run();
+  groupsLayout();
+}
+
+// Snapshot leaf positions; the returned function animates every leaf from the snapshot to where it is now,
+// then saves and fits.
+function animateFrom() {
+  const leaves = cy.nodes().filter((n) => !n.isParent());
+  const before = new Map(leaves.map((n) => [n.id(), { ...n.position() }]));
+  return () => {
+    const after = new Map(leaves.map((n) => [n.id(), { ...n.position() }]));
+    leaves.forEach((n) => n.position(before.get(n.id())));
+    leaves.forEach((n) => n.animate({ position: after.get(n.id()), duration: 350 }));
+    setTimeout(() => { savePositions(); cy.animate({ fit: { eles: cy.elements(), padding: 40 }, duration: 250 }); }, 380);
+  };
+}
+
+const block = (n) => {
+  const bb = n.boundingBox({ includeLabels: true });
+  return { w: Math.max(bb.w, 40), h: Math.max(bb.h, 30), cx: (bb.x1 + bb.x2) / 2, cy: (bb.y1 + bb.y2) / 2 };
+};
+
+// Wrap `kids` (in the given order) into centred rows no wider than maxW, top-aligned at origin.
+function packRows(kids, origin, opts) {
+  const items = kids.map((n, i) => ({ id: n.id(), n, x: i, ...block(n) }));
+  const pos = layered(items, [], { gapY: 0, ...opts });
+  items.forEach((it) => { const p = pos.get(it.id); shiftUnit(it.n, origin.x + p.x - it.cx, origin.y + p.y - it.cy); });
+}
+
+// Width that makes a roughly landscape block out of these items.
+const rowWidth = (kids, gap, aspect) => {
+  const bs = kids.map(block);
+  const area = bs.reduce((s, b) => s + (b.w + gap) * (b.h + gap), 0);
+  const firstThree = bs.slice(0, 3).reduce((s, b) => s + b.w + gap, 0) - gap;  // small boxes stay on one row
+  return Math.max(firstThree + 1, Math.sqrt(area * aspect));
+};
+
+// Groups layout: pack every box's contents bottom-up into tidy rows (keeping their current reading order),
+// then pack the top-level boxes, agents and notes the same way, with the files underneath.
+function groupsLayout() {
+  const done = animateFrom();
+  const isFileTree = (n) => n.hasClass('folder') || (n.hasClass('file') && !n.parent('.group').nonempty());
+  const reading = (a, b) => {
+    const p = block(a), q = block(b);
+    return Math.abs(p.cy - q.cy) > 60 ? p.cy - q.cy : p.cx - q.cx;
+  };
+  const arrange = (container) => {
+    const kids = (container ? container.children() : cy.nodes().orphans()).filter((n) => !isFileTree(n));
+    if (!kids.length) return;
+    kids.filter((n) => n.isParent()).forEach(arrange);
+    const sorted = kids.sort(reading);
+    const gap = container ? 30 : 80;
+    const o = container ? block(container) : { cx: 0, cy: 0 };
+    packRows(sorted, { x: o.cx, y: o.cy }, { gapX: gap, maxW: rowWidth(sorted, gap, container ? 2.2 : 1.8) });
+  };
+  arrange(null);
+  if (foldersOn()) packFolders();
+  tidyFiles(cy.nodes('.file').filter((n) => !n.isChild()), true);
+  done();
 }
 
 // Folder mode: pack every folder bottom-up (its files alphabetically, then its subfolders), then lay the
 // top-level folders out in a row under everything else.
 function tidyFolders() {
+  if (!cy.nodes('.folder').length) return;
+  const done = animateFrom();
+  packFolders();
+  done();
+}
+
+function packFolders() {
   const roots = cy.nodes('.folder').orphans();
   if (!roots.length) return;
-  const leaves = cy.nodes().filter((n) => !n.isParent());
-  const before = new Map(leaves.map((n) => [n.id(), { ...n.position() }]));
-  const block = (n) => { const bb = n.boundingBox({ includeLabels: true }); return { w: Math.max(bb.w, 40), h: Math.max(bb.h, 30), cx: (bb.x1 + bb.x2) / 2, cy: (bb.y1 + bb.y2) / 2 }; };
-  const place = (kids, origin, opts) => {
-    const items = kids.map((n, i) => ({ id: n.id(), n, x: i, ...block(n) }));
-    const pos = layered(items, [], opts);
-    items.forEach((it) => { const p = pos.get(it.id); shiftUnit(it.n, origin.x + p.x - it.cx, origin.y + p.y - it.cy); });
-  };
+  const place = packRows;
   const byLabel = (a, b) => a.data('label').localeCompare(b.data('label'));
   const pack = (folder) => {
     const subs = folder.children('.folder').sort(byLabel);
@@ -528,15 +581,11 @@ function tidyFolders() {
   const bb = rest.nonempty() ? rest.boundingBox() : { x1: 0, x2: 0, y2: 0 };
   const rw = roots.reduce((s, n) => s + block(n).w, 0) + 60 * (roots.length - 1);
   place(roots.sort(byLabel), { x: (bb.x1 + bb.x2) / 2, y: bb.y2 + 120 }, { gapX: 60, gapY: 0, maxW: Math.max(rw, 1) });
-  const after = new Map(leaves.map((n) => [n.id(), { ...n.position() }]));
-  leaves.forEach((n) => n.position(before.get(n.id())));
-  leaves.forEach((n) => n.animate({ position: after.get(n.id()), duration: 350 }));
-  setTimeout(() => { savePositions(); cy.animate({ fit: { eles: cy.elements(), padding: 40 }, duration: 250 }); }, 380);
 }
 
 function tidyFiles(files, instant) {
   if (!files.length) return;
-  const others = cy.elements().difference(files);
+  const others = cy.nodes().difference(files);  // nodes only: edges still reach the files' old spots
   const bb = others.nonempty() ? others.boundingBox() : { x1: 0, y2: 0, w: 1200 };
   const sorted = files.sort((a, b) => a.data('label').localeCompare(b.data('label')));
   const cols = Math.max(1, Math.min(6, Math.ceil(Math.sqrt(sorted.length * 2))));
