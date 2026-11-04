@@ -152,7 +152,7 @@ def main(argv=None) -> int:
 
     if already_running(url):
         print(f"agentgraph already running at {url}")
-        if args.dir:
+        if args.dir and watch_dir:
             req = urllib.request.Request(url + "/api/watch", json.dumps({"dir": watch_dir}).encode(),
                                          {"Content-Type": "application/json"})
             urllib.request.urlopen(req, timeout=3).read()
@@ -165,7 +165,7 @@ def main(argv=None) -> int:
         child = ["--host", args.host, "--port", str(args.port), "--layout", str(Path(args.layout).resolve()),
                  "--edge-window", str(args.edge_window), "--depth", str(args.depth), "--model", args.model,
                  "--keep-finished", str(args.keep_finished)]
-        if args.dir:
+        if args.dir and watch_dir:
             child += ["--dir", os.path.abspath(watch_dir)]
         if args.summarize:
             child.append("--summarize")
