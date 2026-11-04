@@ -96,7 +96,18 @@ const cy = cytoscape({
   ],
 });
 
-cy.nodeHtmlLabel([{
+// The label plugin re-measures every node on 'position bounds'. Measuring a box mid-update re-fires 'bounds',
+// which overflows the stack once folders nest deeply, so let that listener see only the nodes that carry a card.
+const cyOn = cy.on;
+cy.on = function (events, ...rest) {
+  const fn = rest.pop();
+  if (typeof events === 'string' && /\b(position|bounds)\b/.test(events) && typeof fn === 'function') {
+    return cyOn.call(this, events, ...rest, function (e) { if (e.target?.is?.('node.agent')) return fn.apply(this, arguments); });
+  }
+  return cyOn.call(this, events, ...rest, fn);
+};
+try { setupCards(); } finally { cy.on = cyOn; }
+function setupCards() { cy.nodeHtmlLabel([{
   query: 'node.agent', halign: 'center', valign: 'center', halignBox: 'center', valignBox: 'center',
   tpl: (d) => {
     const cat = CATS[d.category] || CATS.idle;
@@ -107,7 +118,7 @@ cy.nodeHtmlLabel([{
       <div class="card-f"><span class="mono">${esc(d.short)}${d.sub ? ' · subagent' : ''}</span><span class="cat">${esc(cat.l)}</span></div>
     </div>`;
   },
-}]);
+}]); }
 
 cy.compoundDragAndDrop({
   // folder boxes and the files in them follow the filesystem, so they can't be dropped into user boxes
@@ -322,14 +333,22 @@ function sync() {
     cy.edges().forEach((e) => { if (!edges.has(e.id())) e.remove(); });
     // a removed folder takes its files with it; any still wanted are re-added below
     cy.nodes('.agent, .file, .folder').forEach((n) => { if (!n.removed() && !nodes.has(n.id())) n.remove(); });
+    // Folder ids are paths relative to the watched folder, so after a folder change a box can need to go
+    // inside what used to be its own child. Lift everything that changes parent to the top first, then
+    // re-parent in `nodes` order (parents first); moving one at a time could make a cycle, which hangs cytoscape.
+    const reparent = [];
+    for (const [id, def] of nodes) {
+      const el = cy.getElementById(id);
+      if (el.nonempty() && 'parent' in def.data && (el.data('parent') || undefined) !== def.data.parent) {
+        if (el.isChild()) el.move({ parent: null });
+        reparent.push([el, def.data.parent]);
+      }
+    }
+    for (const [el, parent] of reparent) if (parent) el.move({ parent });
     for (const [id, def] of nodes) {
       const el = cy.getElementById(id);
       const fixed = 'parent' in def.data;  // folder mode decides the parent, not the saved layout
-      if (el.nonempty()) {
-        update(el, def);
-        if (fixed && (el.data('parent') || undefined) !== def.data.parent) el.move({ parent: def.data.parent ?? null });
-        continue;
-      }
+      if (el.nonempty()) { update(el, def); continue; }
       const parent = layout.parents[id];
       if (!fixed && parent && cy.getElementById(parent).nonempty()) def.data.parent = parent;
       if (def.data.type === 'folder') { cy.add(def).scratch('_cls', def.classes); continue; }
