@@ -927,6 +927,8 @@ function wirePanel(el, type) {
 async function attach(id) {
   const a = agentsById.get(id);
   if (!a) return;
+  if (window.agentgraphBridge?.tryAttach({ job_id: a.attachable ? a.short : null, session_id: a.sessionId, pid: a.pid,
+    tty: a.tty, cwd: a.cwd, is_background: a.attachable, name: a.name })) return;
   if (!a.attachable) { toast(`${a.kind} session${a.tty ? ` on ${a.tty}` : ''} — switch to its terminal`, true); return; }
   try {
     const r = await fetch('/api/attach', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
