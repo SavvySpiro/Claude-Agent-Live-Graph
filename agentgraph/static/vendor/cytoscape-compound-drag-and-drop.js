@@ -293,9 +293,13 @@ var addListeners = function addListeners() {
 
       if (overlappingNodes.length > 0) {
         // potential parent
-        var overlappingParents = overlappingNodes.filter(isParent);
+        // agentgraph patch: an empty box has no children, so isParent() is false; count
+        // any valid drop target as a parent instead of wrapping it in a new fake parent
+        var overlappingParents = overlappingNodes.filter(function (n) {
+          return isParent(n) || canBeDropTarget(n);
+        });
 
-        var _parent, _sibling;
+        var _parent, _sibling, _isNew = false;
 
         if (overlappingParents.length > 0) {
           _sibling = cy.collection();
@@ -304,11 +308,14 @@ var addListeners = function addListeners() {
           _sibling = overlappingNodes[0]; // TODO maybe use a metric here to select which one
 
           _parent = cy.add(options.newParentNode(_this.grabbedNode, _sibling));
+          _isNew = true;
         }
 
         _parent.addClass('cdnd-drop-target');
 
-        if (_parent !== _sibling) {
+        // agentgraph patch: was `_parent !== _sibling` (always true), which marked real
+        // boxes as fake parents and let the plugin delete them when their last child left
+        if (_isNew) {
           _parent.addClass('cdnd-new-parent');
         }
 

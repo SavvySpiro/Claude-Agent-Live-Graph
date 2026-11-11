@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import sys
+import urllib.error
 import urllib.request
 import webbrowser
 from pathlib import Path
@@ -49,7 +50,8 @@ def install_service(args) -> int:
     import subprocess
     pkg_root = Path(__file__).resolve().parent.parent
     cmd = [sys.executable, "-m", "agentgraph", "--host", args.host, "--port", str(args.port),
-           "--keep-finished", str(args.keep_finished), "--edge-window", str(args.edge_window)]
+           "--keep-finished", str(args.keep_finished), "--edge-window", str(args.edge_window),
+           "--depth", str(args.depth), "--layout", str(Path(args.layout).expanduser().resolve())]
     if args.dir:
         cmd += ["--dir", os.path.abspath(os.path.expanduser(args.dir))]
     if args.summarize:
@@ -90,12 +92,51 @@ def open_browser(url: str) -> None:
         webbrowser.open(url)
 
 
-def already_running(url: str) -> bool:
+def server_pid(url: str) -> int | None:
+    """Pid of the agentgraph server at url, 0 if one is running but too old to report it, None if none is."""
     try:
         with urllib.request.urlopen(url + "/healthz", timeout=1) as r:
-            return r.read().startswith(b"agentgraph")
+            body = r.read().split()
     except OSError:
+        return None
+    if not body or body[0] != b"agentgraph":
+        return None
+    return int(body[1]) if len(body) > 1 and body[1].isdigit() else 0
+
+
+def already_running(url: str) -> bool:
+    return server_pid(url) is not None
+
+
+def is_service(pid: int | None) -> bool:
+    """True if pid is the main process of the agentgraph systemd user service."""
+    import shutil
+    import subprocess
+    if not pid or not shutil.which("systemctl"):
         return False
+    out = subprocess.run(["systemctl", "--user", "show", "-p", "MainPID", "--value", "agentgraph"],
+                         capture_output=True, text=True).stdout.strip()
+    return out == str(pid)
+
+
+def stop_server(url: str) -> bool:
+    """Stop the server at url. Returns False if it is running but could not be stopped."""
+    import signal
+    import time
+    pid = server_pid(url)
+    if pid is None:
+        return True
+    if pid == 0:
+        print(f"the server at {url} predates --restart; stop it once by hand (e.g. pkill -f 'python3 -m agentgraph')",
+              file=sys.stderr)
+        return False
+    os.kill(pid, signal.SIGTERM)
+    for _ in range(50):
+        if not already_running(url):
+            return True
+        time.sleep(0.1)
+    print(f"server pid {pid} did not stop", file=sys.stderr)
+    return False
 
 
 def main(argv=None) -> int:
@@ -119,14 +160,25 @@ def main(argv=None) -> int:
                     help="install a /agent-graph skill so any Claude session can open this view, then exit")
     ap.add_argument("--install-service", action="store_true",
                     help="install and start a systemd user service running with these flags, then exit")
+    ap.add_argument("--restart", action="store_true",
+                    help="stop the running server and start it again, to load code changes "
+                         "(restarts the systemd service if it is installed)")
     ap.add_argument("--dump", action="store_true", help="print one JSON snapshot and exit")
     args = ap.parse_args(argv)
     url = f"http://{args.host}:{args.port}"
+
+    if (args.install_skill or args.install_service) and args.dir and not os.path.isdir(os.path.expanduser(args.dir)):
+        print(f"error: {args.dir} is not a directory", file=sys.stderr)
+        return 2
 
     if args.install_skill:
         SKILL_DIR.mkdir(parents=True, exist_ok=True)
         pkg_root = Path(__file__).resolve().parent.parent
         dir_arg = f" --dir '{os.path.abspath(os.path.expanduser(args.dir))}'" if args.dir else ""
+        if args.host != ap.get_default("host"):
+            dir_arg = f" --host {args.host}" + dir_arg
+        if args.layout != ap.get_default("layout"):
+            dir_arg = f" --layout '{Path(args.layout).expanduser().resolve()}'" + dir_arg
         python = f"cd '{pkg_root}' && {sys.executable}"
         (SKILL_DIR / "SKILL.md").write_text(SKILL_MD.format(python=python, port=args.port, dir_arg=dir_arg))
         print(f"installed {SKILL_DIR / 'SKILL.md'} — type /agent-graph in any Claude session")
@@ -134,6 +186,24 @@ def main(argv=None) -> int:
 
     if args.install_service:
         return install_service(args)
+
+    if args.restart:
+        if is_service(server_pid(url)):
+            import subprocess
+            if subprocess.call(["systemctl", "--user", "restart", "agentgraph"]):
+                return 1
+            import time
+            for _ in range(100):
+                if already_running(url):
+                    break
+                time.sleep(0.1)
+            print(f"restarted the agentgraph service; reload {url}")
+            if args.open:
+                open_browser(url)
+            return 0
+        if not stop_server(url):
+            return 1
+        args.background = True  # start a fresh copy below with these flags
 
     from .collector import Collector
     from .server import LayoutStore, create_app
@@ -152,10 +222,19 @@ def main(argv=None) -> int:
 
     if already_running(url):
         print(f"agentgraph already running at {url}")
-        if args.dir:
-            req = urllib.request.Request(url + "/api/watch", json.dumps({"dir": watch_dir}).encode(),
+        if args.dir and watch_dir:
+            # The server resolves relative paths against its own cwd, so send an absolute one.
+            req = urllib.request.Request(url + "/api/watch", json.dumps({"dir": os.path.abspath(watch_dir)}).encode(),
                                          {"Content-Type": "application/json"})
-            urllib.request.urlopen(req, timeout=3).read()
+            try:
+                urllib.request.urlopen(req, timeout=3).read()
+            except urllib.error.HTTPError as e:
+                try:
+                    msg = json.loads(e.read()).get("error") or e.reason
+                except ValueError:
+                    msg = e.reason
+                print(f"error: server rejected --dir: {msg}", file=sys.stderr)
+                return 1
         if args.open:
             open_browser(url)
         return 0
@@ -165,7 +244,7 @@ def main(argv=None) -> int:
         child = ["--host", args.host, "--port", str(args.port), "--layout", str(Path(args.layout).resolve()),
                  "--edge-window", str(args.edge_window), "--depth", str(args.depth), "--model", args.model,
                  "--keep-finished", str(args.keep_finished)]
-        if args.dir:
+        if args.dir and watch_dir:
             child += ["--dir", os.path.abspath(watch_dir)]
         if args.summarize:
             child.append("--summarize")
